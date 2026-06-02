@@ -106,6 +106,21 @@ class FeedForward(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+# Transformer block: communication followed by computation
+class Block(nn.Module):
+
+    def __init__(self, n_embd, n_head):
+        # n_embd: embedding dimmension, n_head: number of heads we want
+        super().__init__()
+        head_size = n_embd // n_head
+        self.self_attention = MultiHeadAttention(n_head, head_size)
+        self.feed_forward = FeedForward(n_embd)
+
+    def forward(self, x):
+        x = self.self_attention(x)
+        x = self.feed_forward(x)
+        return x
+
 # simple bigram model
 class BigramLanguageModel(nn.Module):
 
@@ -114,8 +129,11 @@ class BigramLanguageModel(nn.Module):
         # each token directly reads off the logits for the next token from a lookup table
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
-        self.sa_heads = MultiHeadAttention(4, n_embd//4) # i.e. 4 heads of 8-dimensional self-attention
-        self.feed_forward = FeedForward(n_embd)
+        self.blocks = nn.Sequential(
+            Block(n_embd, n_head=4),
+            Block(n_embd, n_head=4),
+            Block(n_embd, n_head=4),
+        )
         self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, index_X, targets=None):
@@ -125,8 +143,7 @@ class BigramLanguageModel(nn.Module):
         token_embd = self.token_embedding_table(index_X) # (B, T, C) = (batch, time, channel)
         positional_embd = self.position_embedding_table(torch.arange(T, device=device)) # (T, C)
         x = token_embd + positional_embd # (B, T, C)
-        x = self.sa_heads(x) # apply one head of self-attention (B, T, C)
-        x = self.feed_forward(x) # (B, T, C)
+        x = self.blocks(x) # (B, T, C)
         logits = self.lm_head(x) # (B, T, vocab_size)
 
         if targets is None:
@@ -168,7 +185,7 @@ for iter in range(max_iters):
     # every once in a while evaluate the loss on train and val sets
     if iter % eval_interval == 0:
         losses = estimate_loss()
-        print(f"setp {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
     # sample a batch of data
     X_batch, Y_batch = get_batch('train')
     # evaluate the loss
